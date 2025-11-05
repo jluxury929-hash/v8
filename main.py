@@ -1,4 +1,4 @@
-# FastAPI Backend for 10X Hyper Earning Engine
+# main.py - FastAPI Backend for 10X Hyper Earning Engine
 # Compatible with Python 3.13 on Railway
 
 from fastapi import FastAPI, HTTPException, Header
@@ -7,6 +7,12 @@ from pydantic import BaseModel
 from web3 import Web3
 import os
 from datetime import datetime
+
+# --- Standard Railway Configuration ---
+# Railway uses the 'PORT' environment variable
+PORT = os.getenv("PORT", 8000)
+# The application entry point must be consistent (e.g., 'main:app')
+# --------------------------------------
 
 app = FastAPI()
 
@@ -20,6 +26,7 @@ app.add_middleware(
 )
 
 # Environment variables from Railway
+# Note: Ensure these are set in the Railway dashboard!
 ALCHEMY_KEY = os.getenv("ALCHEMY_API_KEY", "")
 PRIVATE_KEY = os.getenv("ADMIN_PRIVATE_KEY", "")
 TOKEN_ADDRESS = os.getenv("REWARD_TOKEN_ADDRESS", "0x8502496d6739dd6e18ced318c4b5fc12a5fb2c2c")
@@ -29,12 +36,29 @@ w3 = None
 admin_account = None
 
 if ALCHEMY_KEY:
-    w3 = Web3(Web3.HTTPProvider(f"https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_KEY}"))
+    # Use the Web3 connection string
+    # Note: If deploying to a different network (e.g., Goerli), change 'eth-mainnet'
+    provider_url = f"https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_KEY}"
+    w3 = Web3(Web3.HTTPProvider(provider_url))
+    
+    # Check for connection and private key
     if PRIVATE_KEY and w3.is_connected():
-        admin_account = w3.eth.account.from_key(PRIVATE_KEY)
-        print(f"✅ Connected to Ethereum - Admin: {admin_account.address}")
+        # Add the '0x' prefix if missing, which is a common error when setting environment variables
+        prefixed_private_key = PRIVATE_KEY if PRIVATE_KEY.startswith('0x') else '0x' + PRIVATE_KEY
+        
+        try:
+            admin_account = w3.eth.account.from_key(prefixed_private_key)
+            print(f"✅ Connected to Ethereum - Admin: {admin_account.address}")
+        except Exception as e:
+            print(f"❌ Web3 Key Error: {e}")
+            admin_account = None
+    else:
+        print("⚠️ Web3 connected but Admin Private Key is missing or invalid.")
+else:
+    print("⚠️ ALCHEMY_API_KEY is missing. Web3 functionality disabled.")
 
-# Minimal ERC20 Mint ABI
+
+# Minimal ERC20 Mint ABI (Rest of the file uses the original logic)
 TOKEN_ABI = [
     {
         "inputs": [
@@ -153,11 +177,15 @@ def get_metrics(x_wallet_address: str = Header(None)):
     principal = 100000.0  # Virtual principal
     new_earnings, total_apy = calculate_earnings(principal, seconds_running)
     
+    # Note: In a real app, you wouldn't keep adding earnings on every call. 
+    # This simulation updates total_earned across the lifespan of the session.
     session["total_earned"] += new_earnings
     accumulated = session["total_earned"]
     
-    # Try to mint tokens every 5 seconds
+    # Try to mint tokens every 5 seconds (Only runs if w3 and admin_account are configured)
     if seconds_since_mint >= 5 and w3 and admin_account:
+        # Before minting, you should ideally calculate the *new* earnings since the last mint,
+        # not the entire accumulated amount. For this simulation, we use the total and reset.
         try:
             mint_result = mint_tokens_to_wallet(wallet, accumulated)
             if mint_result:
@@ -188,6 +216,10 @@ def mint_tokens_to_wallet(wallet_address, amount):
     if not w3 or not admin_account:
         print("⚠️ Web3 or admin account not configured")
         return None
+    
+    # NOTE ON SECURITY: This function attempts a real transaction on Mainnet. 
+    # This is highly expensive and should only be used on a test network (e.g., Sepolia) 
+    # with a mock token contract.
     
     try:
         # Convert amount to wei (18 decimals)
@@ -256,9 +288,9 @@ def stop_engine(data: dict):
     
     return {"success": True, "message": "Engine stopped"}
 
-# Railway requires this to run
+# NOTE: This block is primarily for local testing. Railway uses the startCommand below.
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 8000))
-    print(f"\n🚀 Starting server on port {port}")
-    uvicorn.run(app, host="0.0.0.0", port=port}
+    # Use the PORT environment variable set at the top
+    print(f"\n🚀 Starting server on port {PORT}")
+    uvicorn.run(app, host="0.0.0.0", port=int(PORT))
